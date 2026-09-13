@@ -1,0 +1,14 @@
+[
+  {
+    "cliente": "Kevin",
+    "servicio": "limpieza",
+    "fecha": "2026-09-18",
+    "hora": "09:00",
+    "codigo": "OA-F383042BE6D8",
+    "estado": "cancelada",
+    "precio_cop": 90000,
+    "duracion_minutos": 45,
+    "creada_en": "2026-09-13T17:41:54.765679-05:00",
+    "cancelada_en": "2026-09-13T17:43:47.237196-05:00"
+  }
+]

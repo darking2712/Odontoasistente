@@ -1,0 +1,24 @@
+{
+  "nombre": "Consultorio OdontoAsistente",
+  "datos_ficticios": true,
+  "ubicacion": "Calle 45 #12-30, Armenia, Quindío (dirección ficticia)",
+  "zona_horaria": "America/Bogota",
+  "capacidad": 1,
+  "paso_minutos": 30,
+  "horarios": {
+    "0": ["08:00", "18:00"],
+    "1": ["08:00", "18:00"],
+    "2": ["08:00", "18:00"],
+    "3": ["08:00", "18:00"],
+    "4": ["08:00", "18:00"],
+    "5": ["08:00", "13:00"]
+  },
+  "servicios": {
+    "valoracion": {"nombre": "Valoración general", "precio_cop": 60000, "duracion_minutos": 30},
+    "limpieza": {"nombre": "Limpieza dental (profilaxis)", "precio_cop": 90000, "duracion_minutos": 45},
+    "blanqueamiento": {"nombre": "Blanqueamiento dental", "precio_cop": 350000, "duracion_minutos": 60},
+    "ortodoncia": {"nombre": "Consulta de ortodoncia", "precio_cop": 70000, "duracion_minutos": 30},
+    "extraccion": {"nombre": "Extracción simple", "precio_cop": 120000, "duracion_minutos": 45}
+  },
+  "condiciones": "Confirmar antes de registrar o cancelar. Una persona atendida a la vez. Domingo cerrado. No diagnosticamos ni reemplazamos la valoración presencial del odontólogo. No procesamos pagos."
+}
