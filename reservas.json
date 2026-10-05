@@ -10,5 +10,41 @@
     "duracion_minutos": 45,
     "creada_en": "2026-09-13T17:41:54.765679-05:00",
     "cancelada_en": "2026-09-13T17:43:47.237196-05:00"
+  },
+  {
+    "cliente": "Kevin",
+    "servicio": "blanqueamiento",
+    "fecha": "2026-09-14",
+    "hora": "13:00",
+    "codigo": "OA-8319D956B2F1",
+    "estado": "cancelada",
+    "precio_cop": 350000,
+    "duracion_minutos": 60,
+    "creada_en": "2026-09-14T10:26:11.736126-05:00",
+    "cancelada_en": "2026-09-14T10:28:11.956188-05:00"
+  },
+  {
+    "cliente": "Kevin",
+    "servicio": "limpieza",
+    "fecha": "2026-09-29",
+    "hora": "09:00",
+    "codigo": "OA-A1C88250CD8D",
+    "estado": "cancelada",
+    "precio_cop": 90000,
+    "duracion_minutos": 45,
+    "creada_en": "2026-09-28T10:14:19.739969-05:00",
+    "cancelada_en": "2026-09-28T10:17:03.083722-05:00"
+  },
+  {
+    "cliente": "Kevin",
+    "servicio": "limpieza",
+    "fecha": "2026-10-10",
+    "hora": "10:00",
+    "codigo": "OA-8C77A506EBE2",
+    "estado": "activa",
+    "precio_cop": 90000,
+    "duracion_minutos": 45,
+    "creada_en": "2026-10-04T13:32:34.386737-05:00",
+    "cancelada_en": null
   }
 ]
