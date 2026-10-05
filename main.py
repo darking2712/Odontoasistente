@@ -41,6 +41,15 @@ class CrearReserva(DatosReserva):
     confirmado: Literal[True]
 
 
+class ModificarReserva(BaseModel):
+    """Reagenda una reserva activa: cambia servicio, fecha y hora. El cliente no cambia."""
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+    servicio: str = Field(min_length=1, max_length=40)
+    fecha: date
+    hora: str = Field(pattern=r"^([01]\d|2[0-3]):[0-5]\d$")
+    confirmado: Literal[True]
+
+
 class Registro(DatosReserva):
     codigo: str
     estado: Literal["activa", "cancelada"]
@@ -48,6 +57,7 @@ class Registro(DatosReserva):
     duracion_minutos: int = Field(gt=0)
     creada_en: str
     cancelada_en: str | None = None
+    modificada_en: str | None = None
 
 
 class Extraccion(BaseModel):
@@ -146,6 +156,29 @@ def crear(datos: CrearReserva):
         registros.append(registro)
         guardar(registros)
         return registro
+
+
+@app.put("/reservas/{codigo}")
+def modificar(codigo: str, datos: ModificarReserva):
+    with LOCK:
+        registros = leer()
+        for r in registros:
+            if r["codigo"] != codigo.strip().upper():
+                continue
+            if r["estado"] != "activa":
+                raise HTTPException(409, "Solo se pueden modificar reservas activas.")
+            servicio = servicio_valido(datos.servicio)
+            # Se calcula la disponibilidad sin contar la reserva que se está modificando,
+            # para que no choque consigo misma al conservar la misma hora.
+            otros = [x for x in registros if x["codigo"] != r["codigo"]]
+            if datos.hora not in horarios_libres(datos.fecha, datos.servicio, otros):
+                raise HTTPException(409, "Horario no disponible. La reserva no se modificó.")
+            r.update(servicio=datos.servicio, fecha=datos.fecha.isoformat(), hora=datos.hora,
+                      precio_cop=servicio["precio_cop"], duracion_minutos=servicio["duracion_minutos"],
+                      modificada_en=datetime.now(ZONA).isoformat())
+            guardar(registros)
+            return r
+    raise HTTPException(404, "No existe una reserva con ese código.")
 
 
 @app.get("/reservas/{codigo}")
