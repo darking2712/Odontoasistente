@@ -1,20 +1,19 @@
-"""Demo local de un solo negocio. Ejecutar con UN worker; usar datos ficticios."""
+"""OdontoAsistente: API local con reservas en SQLite. Ejecutar con UN worker (las sesiones del chat viven en memoria)."""
 
-import json
-import os
-from datetime import date, datetime, time, timedelta
+from datetime import date, datetime
 from pathlib import Path
 from threading import RLock
 from typing import Literal
-from uuid import uuid4
+import json
 from zoneinfo import ZoneInfo
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from almacen_sqlite import AgendaSQLite, ConflictoReserva, ReservaNoEncontrada, minutos
+
 BASE = Path(__file__).resolve().parent
-ARCHIVO = BASE / "reservas.json"
 NEGOCIO = json.loads((BASE / "negocio.json").read_text(encoding="utf-8-sig"))
 ZONA = ZoneInfo(NEGOCIO["zona_horaria"])
 if NEGOCIO["capacidad"] != 1 or NEGOCIO["paso_minutos"] <= 0:
@@ -22,10 +21,55 @@ if NEGOCIO["capacidad"] != 1 or NEGOCIO["paso_minutos"] <= 0:
 if any(s["duracion_minutos"] <= 0 or s["precio_cop"] < 0 for s in NEGOCIO["servicios"].values()):
     raise ValueError("Revisar precios y duraciones del negocio.")
 
-# ponytail: bloqueo global de un solo proceso; migrar a transacciones SQLite para varios workers.
+# Horario de cada día (0 = lunes). Los días que no aparecen están cerrados.
+HORARIOS = {int(d): (minutos(h[0]), minutos(h[1])) for d, h in NEGOCIO["horarios"].items()}
+
+
+class AgendaConsultorio(AgendaSQLite):
+    """AgendaSQLite con dos reglas del consultorio: horario propio por día y no reservar horas que ya pasaron hoy."""
+
+    def limites(self, fecha):
+        return HORARIOS[date.fromisoformat(fecha).weekday()]
+
+    def ya_paso(self, fecha, inicio):
+        ahora = datetime.now(ZONA)
+        return fecha == ahora.date().isoformat() and inicio <= ahora.hour * 60 + ahora.minute
+
+    def validar_intervalo(self, fecha, hora, duracion, permitir_pasado=False):
+        self.validar_fecha(fecha, permitir_pasado)
+        apertura, cierre = self.limites(fecha)
+        inicio = minutos(hora)
+        if inicio < apertura or inicio + duracion > cierre:
+            raise ValueError("La atención debe terminar dentro del horario de ese día")
+        if (inicio - apertura) % self.paso:
+            raise ValueError(f"Selecciona una hora en pasos de {self.paso} minutos")
+        if not permitir_pasado and self.ya_paso(fecha, inicio):
+            raise ValueError("Esa hora ya pasó. Elige una hora futura.")
+        return inicio
+
+    def disponibilidad(self, fecha, servicio, excluir=""):
+        resultado = super().disponibilidad(fecha, servicio, excluir)
+        _, cierre = self.limites(fecha)
+        duracion = resultado["duracion_minutos"]
+        resultado["horas"] = [h for h in resultado["horas"]
+                              if minutos(h) + duracion <= cierre and not self.ya_paso(fecha, minutos(h))]
+        return resultado
+
+
+agenda = AgendaConsultorio(
+    BASE / "reservas.db",
+    NEGOCIO["servicios"],
+    apertura=min(h[0] for h in NEGOCIO["horarios"].values()),
+    cierre=max(h[1] for h in NEGOCIO["horarios"].values()),
+    dias=tuple(HORARIOS),
+    paso=NEGOCIO["paso_minutos"],
+)
+
+# El bloqueo solo protege las sesiones del chat (diccionario en memoria).
+# Las reservas se protegen con la transacción de SQLite.
 LOCK = RLock()
 SESIONES: dict[str, dict] = {}
-app = FastAPI(title="Punto Norte · API de clase", version="1.0.0",
+app = FastAPI(title="OdontoAsistente · API de clase", version="2.0.0",
               description="Datos ficticios. API local sin autenticación; no publicar en Internet.")
 
 
@@ -50,16 +94,6 @@ class ModificarReserva(BaseModel):
     confirmado: Literal[True]
 
 
-class Registro(DatosReserva):
-    codigo: str
-    estado: Literal["activa", "cancelada"]
-    precio_cop: int
-    duracion_minutos: int = Field(gt=0)
-    creada_en: str
-    cancelada_en: str | None = None
-    modificada_en: str | None = None
-
-
 class Extraccion(BaseModel):
     """La interpretación del LLM es entrada no confiable: se valida antes de usarla."""
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
@@ -78,26 +112,16 @@ class Mensaje(BaseModel):
     datos: Extraccion = Field(default_factory=Extraccion)
 
 
-def leer():
+def ejecutar(funcion, *args):
+    """Llama al almacén y traduce sus errores a HTTP: 404, 409 y 422."""
     try:
-        contenido = json.loads(ARCHIVO.read_text(encoding="utf-8-sig"))
-        if not isinstance(contenido, list):
-            raise ValueError("Se esperaba una lista")
-        return [Registro.model_validate(r).model_dump(mode="json") for r in contenido]
-    except (OSError, ValueError) as exc:
-        raise HTTPException(503, "No se pudo leer reservas.json. Revisar el archivo; no se sobrescribió.") from exc
-
-
-def guardar(registros):
-    temporal = ARCHIVO.with_suffix(".tmp")
-    try:
-        with temporal.open("w", encoding="utf-8") as archivo:
-            json.dump(registros, archivo, ensure_ascii=False, indent=2)
-            archivo.flush()
-            os.fsync(archivo.fileno())
-        os.replace(temporal, ARCHIVO)
-    except OSError as exc:
-        raise HTTPException(503, "No se pudo guardar la operación. No se confirmó su registro.") from exc
+        return funcion(*args)
+    except ReservaNoEncontrada as error:
+        raise HTTPException(404, str(error)) from error
+    except ConflictoReserva as error:
+        raise HTTPException(409, str(error)) from error
+    except ValueError as error:
+        raise HTTPException(422, str(error)) from error
 
 
 def servicio_valido(servicio):
@@ -106,28 +130,17 @@ def servicio_valido(servicio):
     return NEGOCIO["servicios"][servicio]
 
 
-def horarios_libres(fecha, servicio, registros):
-    duracion = servicio_valido(servicio)["duracion_minutos"]
-    ahora = datetime.now(ZONA)
-    if fecha < ahora.date():
-        raise HTTPException(422, "La fecha ya pasó. Elige una fecha futura.")
-    horario = NEGOCIO["horarios"].get(str(fecha.weekday()))
-    if not horario:
+def con_precio(reserva):
+    """La tabla guarda la duración; el precio se toma del catálogo actual."""
+    precio = NEGOCIO["servicios"].get(reserva["servicio"], {}).get("precio_cop")
+    return {**reserva, "precio_cop": precio}
+
+
+def horas_libres(fecha, servicio):
+    servicio_valido(servicio)
+    if fecha.weekday() not in HORARIOS:
         return []
-    inicio = datetime.combine(fecha, time.fromisoformat(horario[0]), ZONA)
-    cierre = datetime.combine(fecha, time.fromisoformat(horario[1]), ZONA)
-    ocupados = []
-    for r in registros:
-        if r["fecha"] == fecha.isoformat() and r["estado"] == "activa":
-            desde = datetime.combine(fecha, time.fromisoformat(r["hora"]), ZONA)
-            ocupados.append((desde, desde + timedelta(minutes=r["duracion_minutos"])))
-    libres = []
-    while inicio + timedelta(minutes=duracion) <= cierre:
-        fin = inicio + timedelta(minutes=duracion)
-        if inicio > ahora and not any(inicio < hasta and fin > desde for desde, hasta in ocupados):
-            libres.append(inicio.strftime("%H:%M"))
-        inicio += timedelta(minutes=NEGOCIO["paso_minutos"])
-    return libres
+    return ejecutar(agenda.disponibilidad, fecha.isoformat(), servicio)["horas"]
 
 
 @app.get("/servicios")
@@ -137,72 +150,39 @@ def servicios():
 
 @app.get("/disponibilidad")
 def disponibilidad(fecha: date, servicio: str):
-    with LOCK:
-        return {"fecha": fecha.isoformat(), "servicio": servicio,
-                "horarios": horarios_libres(fecha, servicio, leer())}
+    return {"fecha": fecha.isoformat(), "servicio": servicio,
+            "horarios": horas_libres(fecha, servicio)}
+
+
+@app.get("/reservas")
+def listar():
+    return [con_precio(r) for r in agenda.listar()]
 
 
 @app.post("/reservas", status_code=201)
 def crear(datos: CrearReserva):
-    with LOCK:
-        registros = leer()
-        if datos.hora not in horarios_libres(datos.fecha, datos.servicio, registros):
-            raise HTTPException(409, "Horario no disponible. La reserva no se registró.")
-        servicio = servicio_valido(datos.servicio)
-        registro = Registro(**datos.model_dump(exclude={"confirmado"}),
-                            codigo="OA-" + uuid4().hex[:12].upper(), estado="activa",
-                            precio_cop=servicio["precio_cop"], duracion_minutos=servicio["duracion_minutos"],
-                            creada_en=datetime.now(ZONA).isoformat()).model_dump(mode="json")
-        registros.append(registro)
-        guardar(registros)
-        return registro
+    servicio_valido(datos.servicio)
+    return con_precio(ejecutar(agenda.crear, datos.cliente, datos.servicio,
+                               datos.fecha.isoformat(), datos.hora))
 
 
 @app.put("/reservas/{codigo}")
 def modificar(codigo: str, datos: ModificarReserva):
-    with LOCK:
-        registros = leer()
-        for r in registros:
-            if r["codigo"] != codigo.strip().upper():
-                continue
-            if r["estado"] != "activa":
-                raise HTTPException(409, "Solo se pueden modificar reservas activas.")
-            servicio = servicio_valido(datos.servicio)
-            # Se calcula la disponibilidad sin contar la reserva que se está modificando,
-            # para que no choque consigo misma al conservar la misma hora.
-            otros = [x for x in registros if x["codigo"] != r["codigo"]]
-            if datos.hora not in horarios_libres(datos.fecha, datos.servicio, otros):
-                raise HTTPException(409, "Horario no disponible. La reserva no se modificó.")
-            r.update(servicio=datos.servicio, fecha=datos.fecha.isoformat(), hora=datos.hora,
-                      precio_cop=servicio["precio_cop"], duracion_minutos=servicio["duracion_minutos"],
-                      modificada_en=datetime.now(ZONA).isoformat())
-            guardar(registros)
-            return r
-    raise HTTPException(404, "No existe una reserva con ese código.")
+    servicio_valido(datos.servicio)
+    return con_precio(ejecutar(agenda.modificar, codigo.strip().upper(), datos.servicio,
+                               datos.fecha.isoformat(), datos.hora))
 
 
 @app.get("/reservas/{codigo}")
 def consultar(codigo: str):
-    with LOCK:
-        for r in leer():
-            if r["codigo"] == codigo.strip().upper():
-                return r
-    raise HTTPException(404, "No existe una reserva con ese código.")
+    return con_precio(ejecutar(agenda.consultar, codigo.strip().upper()))
 
 
 @app.delete("/reservas/{codigo}")
 def cancelar(codigo: str, confirmado: bool = Query(False)):
     if not confirmado:
         raise HTTPException(422, "Se requiere confirmación para cancelar.")
-    with LOCK:
-        registros = leer()
-        for r in registros:
-            if r["codigo"] == codigo.strip().upper():
-                if r["estado"] == "activa":
-                    r.update(estado="cancelada", cancelada_en=datetime.now(ZONA).isoformat())
-                    guardar(registros)
-                return r
-    raise HTTPException(404, "No existe una reserva con ese código.")
+    return con_precio(ejecutar(agenda.cancelar, codigo.strip().upper()))
 
 
 def resumen(r):
@@ -272,7 +252,7 @@ def chat(entrada: Mensaje):
             accion = estado["intencion"]
             if accion in {"consultar", "cancelar"}:
                 if not estado.get("codigo"):
-                    return responder(estado, "Escribe el código de la reserva, por ejemplo PN-...")
+                    return responder(estado, "Escribe el código de la reserva, por ejemplo 1A2B3C4D.")
                 r = consultar(estado["codigo"])
                 if accion == "consultar":
                     return responder(estado, resumen(r) + ". Estado: " + r["estado"] + ". Código: " + r["codigo"])
@@ -282,12 +262,13 @@ def chat(entrada: Mensaje):
                 return responder(estado, "Vas a cancelar: " + resumen(r) + ". Escribe CONFIRMAR o ABORTAR.")
 
             if not estado.get("servicio"):
-                return responder(estado, "¿Qué servicio necesitas: corte o barba?")
+                opciones = ", ".join(s["nombre"] for s in NEGOCIO["servicios"].values())
+                return responder(estado, "¿Qué servicio necesitas? Opciones: " + opciones + ".")
             servicio_valido(estado["servicio"])
             if not estado.get("fecha"):
                 return responder(estado, "Indica la fecha completa en formato AAAA-MM-DD.")
             fecha = date.fromisoformat(estado["fecha"])
-            libres = horarios_libres(fecha, estado["servicio"], leer())
+            libres = horas_libres(fecha, estado["servicio"])
             if not libres:
                 estado.pop("pendiente", None)
                 return responder(estado, "No hay horarios disponibles para esa fecha. Indica otra fecha.")
