@@ -5,6 +5,7 @@ from pathlib import Path
 from threading import RLock
 from typing import Literal
 import json
+import sqlite3
 from zoneinfo import ZoneInfo
 
 from fastapi import FastAPI, HTTPException, Query
@@ -113,7 +114,7 @@ class Mensaje(BaseModel):
 
 
 def ejecutar(funcion, *args):
-    """Llama al almacén y traduce sus errores a HTTP: 404, 409 y 422."""
+    """Llama al almacén y traduce sus errores a HTTP: 404, 409, 422 y 503."""
     try:
         return funcion(*args)
     except ReservaNoEncontrada as error:
@@ -122,6 +123,8 @@ def ejecutar(funcion, *args):
         raise HTTPException(409, str(error)) from error
     except ValueError as error:
         raise HTTPException(422, str(error)) from error
+    except sqlite3.Error as error:
+        raise HTTPException(503, "No se pudo acceder a la base de datos. Intenta de nuevo.") from error
 
 
 def servicio_valido(servicio):
@@ -156,7 +159,7 @@ def disponibilidad(fecha: date, servicio: str):
 
 @app.get("/reservas")
 def listar():
-    return [con_precio(r) for r in agenda.listar()]
+    return [con_precio(r) for r in ejecutar(agenda.listar)]
 
 
 @app.post("/reservas", status_code=201)

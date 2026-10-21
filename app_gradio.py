@@ -1,5 +1,5 @@
-"""Interfaz del chatbot. Coloca este archivo junto a consulta_llm.py y chatbot_memoria.py.
-La FastAPI del equipo debe estar encendida y las rutas del cliente, adaptadas.
+"""Interfaz Gradio de OdontoAsistente. Va junto a consulta_llm.py y chatbot_memoria.py.
+La FastAPI (main.py) debe estar encendida; su dirección se toma de CHATBOT_API_URL.
 """
 
 import json
@@ -119,7 +119,7 @@ def reiniciar():
     return salida(nuevo_estado(), "Conversación reiniciada.")
 
 
-def crear_interfaz(titulo="Chatbot del equipo"):
+def crear_interfaz(titulo="OdontoAsistente"):
     with gr.Blocks(title=titulo) as demo:
         gr.Markdown(f"## {titulo}\nConsulta servicios y gestiona tus reservas.")
         estado = gr.State(value=nuevo_estado)

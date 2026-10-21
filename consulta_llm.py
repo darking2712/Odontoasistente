@@ -8,8 +8,9 @@ Adaptado a la FastAPI de OdontoAsistente (main.py):
   GET    /disponibilidad?fecha=AAAA-MM-DD&servicio=clave
   POST   /reservas                        (cuerpo con "confirmado": true)
   GET    /reservas/{codigo}
+  PUT    /reservas/{codigo}               (cuerpo con "confirmado": true)
   DELETE /reservas/{codigo}?confirmado=true
-Esa API no tiene PUT, así que aquí no se modifica: se consulta, se crea y se cancela.
+Con esas rutas se consulta, se crea, se modifica y se cancela.
 """
 
 import json
@@ -55,7 +56,7 @@ consultar, cancelar, fuera_de_alcance.
 En servicio usa exactamente una de estas claves: valoracion, limpieza,
 blanqueamiento, ortodoncia, extraccion. Si no corresponde a ninguna, usa cadena vacía.
 Usa fecha AAAA-MM-DD y hora HH:MM en formato de 24 horas. Hoy es {dia} {hoy}.
-El código de una reserva tiene la forma OA-XXXXXXXXXXXX.
+El código de una reserva son 8 caracteres hexadecimales en mayúsculas, por ejemplo 1A2B3C4D.
 Si un dato no aparece en la pregunta, usa una cadena vacía; no lo inventes.
 No digas que hiciste una reserva: solo identifica la intención.
 """
