@@ -1,0 +1,21 @@
+# Entorno virtual y caché de Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+
+# Credenciales: nunca subir claves reales
+.env
+.env.*
+*.key
+
+# Archivos temporales de SQLite (reservas.db sí se versiona como datos de prueba)
+*.db-journal
+*.db-wal
+*.db-shm
+
+# Editor y sistema
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
