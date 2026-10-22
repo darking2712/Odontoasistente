@@ -3,7 +3,7 @@
 Chatbot de reservas para un consultorio odontológico **ficticio** (Armenia, Quindío). Una persona conversa en español; el sistema interpreta lo que pide, valida las reglas del negocio y guarda las reservas en SQLite.
 
 - **Curso:** Electiva II (EAM-2026II) · Segundo corte
-- **Integrante:** [tu nombre completo] (trabajo individual)
+- **Integrante:** Kevin Londoño Hernandez (trabajo individual)
 - **Repositorio:** https://github.com/darking2712/Odontoasistente
 
 > Todos los datos (consultorio, dirección, clientes y reservas) son ficticios. No ingreses información personal real.
