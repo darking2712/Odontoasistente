@@ -1,0 +1,82 @@
+# Salida de: python probar_demo.py
+# Ejecutada el 2026-10-21 en una copia limpia del repositorio (sin __pycache__ ni .git), con 'pip install -r requirements.txt' en un entorno nuevo
+# Entorno: Linux, Python 3.12.3, fastapi 0.159.0, gradio 6.30.0
+# Usa una base SQLite temporal: no modifica reservas.db. Avisos de deprecación de librerías ocultos con PYTHONWARNINGS=ignore.
+
+
+== 1. Validaciones de la API ==
+[OK] GET /servicios responde 200
+[OK] 09:00 aparece libre en un día sin reservas
+[OK] sin confirmado=true se rechaza (422)
+[OK] hora 25:00 se rechaza (422)
+[OK] servicio inventado se rechaza (422)
+[OK] atención que termina después del cierre (18:00 + 30 min) se rechaza (422)
+[OK] hora fuera del paso de 30 min (09:15) se rechaza (422)
+[OK] fecha pasada se rechaza (422)
+[OK] domingo cerrado: sin horarios
+[OK] sábado cierra a las 13:00: última valoración 12:30
+[OK] hasta aquí no se guardó ninguna fila
+
+== 2. Concurrencia: dos peticiones por el mismo horario ==
+[OK] una se registra (201) y la otra se rechaza (409)
+[OK] SQLite tiene exactamente 1 fila activa
+
+== 3. Persistencia al reiniciar la API ==
+[OK] la reserva sigue activa tras reiniciar
+[OK] consultar un código inexistente da 404
+
+== 4. Cruce de intervalos (reserva activa 09:00-09:30) ==
+[OK] limpieza 08:30 (termina 09:15) no está libre
+[OK] limpieza 09:00 no está libre
+[OK] limpieza 08:00 (termina 08:45) sí está libre
+[OK] limpieza 09:30 (empieza al terminar la otra) sí está libre
+[OK] POST limpieza 08:30 se rechaza por cruce (409)
+[OK] POST limpieza 09:00 se rechaza por cruce (409)
+
+== 5. Modificar ==
+[OK] PUT sin confirmado=true se rechaza (422)
+[OK] PUT sobre código inexistente da 404
+[OK] PUT a un horario ocupado por otra reserva da 409
+[OK] PUT puede solaparse con su propio horario anterior (200, dura 45 min)
+[OK] PUT que invade la reserva de Pedro (09:30 + 45 min) da 409
+[OK] PUT a un horario libre (11:00) responde 200
+[OK] SQLite refleja el cambio (valoracion, 11:00, 30 min)
+[OK] el horario anterior (09:00) quedó libre
+
+== 6. Cancelar ==
+[OK] DELETE sin confirmado=true se rechaza (422)
+[OK] DELETE confirmado cancela la reserva
+[OK] cancelar dos veces da 409
+[OK] modificar una reserva cancelada da 409
+[OK] la cancelación libera el horario (11:00)
+[OK] la fila cancelada se conserva en SQLite
+
+== 7. Chat: varios turnos, confirmación, dos sesiones y reinicio ==
+[OK] el chat arma el resumen pendiente (09:00)
+[OK] el resumen aún no guarda nada en SQLite
+[OK] otra sesión no puede confirmar el resumen ajeno
+[OK] la corrección conserva los demás datos y cambia la hora
+[OK] dos sesiones guardan datos distintos
+[OK] /reset limpia solo la sesión indicada
+[OK] preguntar un precio no pierde el resumen pendiente
+[OK] un 'Sí' no confirma: solo CONFIRMAR autoriza
+[OK] CONFIRMAR registra la reserva
+[OK] la reserva quedó en SQLite a las 10:00
+[OK] un segundo CONFIRMAR no duplica la reserva
+[OK] /reset conserva las reservas ya registradas
+[OK] pedir cancelar no cancela hasta confirmar
+[OK] CONFIRMAR cancela la reserva
+[OK] datos con 'confirmado' inyectado se rechazan (422)
+[OK] POST directo toma el horario antes de confirmar
+[OK] CONFIRMAR con el horario ya ocupado da 409
+[OK] tras el 409 el resumen pendiente se descarta
+
+== 8. Errores de almacenamiento ==
+[OK] fallo de SQLite al crear informa 503
+[OK] fallo de SQLite al listar informa 503
+[OK] tras el fallo no cambió ninguna fila
+[OK] al volver el almacén se puede continuar (201)
+
+OK: validaciones, concurrencia, persistencia, cruces, modificación, cancelación, chat y errores.
+
+# Comprobaciones [OK]: 57
